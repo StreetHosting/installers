@@ -160,6 +160,31 @@ done
 # Verify Installation
 if [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ]; then
     log_success "A stack n8n foi instalada e iniciada com sucesso."
+    
+    # Save Credentials
+    CRED_DIR="/etc/street_preinstallers/credentials"
+    mkdir -p "$CRED_DIR"
+    cat <<EOF > "$CRED_DIR/n8n.txt"
+====================================================
+n8n - Credenciais de Acesso
+Gerado em: $(date)
+====================================================
+
+Acesso: http://${SERVER_IP}:5678
+
+Banco de Dados (PostgreSQL):
+Database: n8n_database
+Admin User: n8n_admin
+Admin Pass: ${POSTGRES_ADMIN_PASS}
+App User: n8n_user
+App Pass: ${POSTGRES_USER_PASS}
+
+Segurança:
+Runners Auth Token: ${RUNNERS_AUTH_TOKEN}
+====================================================
+EOF
+    chmod 600 "$CRED_DIR/n8n.txt"
+
     log_success "Acesso: http://${SERVER_IP}:5678"
     log_success "Porta: 5678"
     log_info "-------------------------------------------"

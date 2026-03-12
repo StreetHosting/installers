@@ -70,6 +70,23 @@ EOF
 log_info "Iniciando o container do Uptime Kuma..."
 docker compose up -d
 
+# Save Credentials
+CRED_DIR="/etc/street_preinstallers/credentials"
+mkdir -p "$CRED_DIR"
+cat <<EOF > "$CRED_DIR/uptime-kuma.txt"
+====================================================
+Uptime Kuma - Informações de Acesso
+Gerado em: $(date)
+====================================================
+
+Acesso: http://${SERVER_IP}:3001
+Porta: 3001
+
+Nota: Configure seu usuário administrador no primeiro acesso.
+====================================================
+EOF
+chmod 600 "$CRED_DIR/uptime-kuma.txt"
+
 # Final Access Information (Rule 10)
 log_success "Instalação do Uptime Kuma concluída!"
 log_info "Acesso: http://${SERVER_IP}:3001"

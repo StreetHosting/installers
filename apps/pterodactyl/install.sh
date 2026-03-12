@@ -52,6 +52,10 @@ log_info "Configurando o diretório da aplicação: $APP_DIR"
 mkdir -p "$APP_DIR/var"
 mkdir -p "$APP_DIR/nginx"
 mkdir -p "$APP_DIR/db"
+
+# Ensure correct permissions for Pterodactyl (UID 82 for Alpine-based ghcr image)
+chown -R 82:82 "$APP_DIR/var"
+
 cd "$APP_DIR"
 
 # Get Public IP for configuration
@@ -94,7 +98,7 @@ services:
       - ./var/:/app/var/
       - /etc/localtime:/etc/localtime:ro
     environment:
-      - APP_URL=http://${SERVER_IP}
+      - APP_URL=http://${SERVER_IP}:8080
       - APP_TIMEZONE=UTC
       - APP_SERVICE_AUTHOR=admin@example.com
       - APP_KEY=${PTERO_APP_KEY}
@@ -154,12 +158,12 @@ if [ $COUNT -eq $MAX_RETRIES ]; then
     docker compose logs database
     exit 1
 fi
+
+# Ensure permissions again after migrations (Pterodactyl sometimes creates new files)
+docker compose exec -T panel chown -R www-data:www-data /app/storage /app/bootstrap/cache
 set -e
 
 # Create Initial Admin User (non-interactive)
-# Pterodactyl doesn't have a non-interactive artisan command for user creation with all fields.
-# We will create it via tinker or raw SQL, or just skip it and let user create on first login if possible.
-# Actually, Pterodactyl REQUIRES an admin user.
 log_info "Criando usuário administrador inicial..."
 ADMIN_PASS=$(openssl rand -hex 8)
 docker compose exec -T panel php artisan p:user:make \
@@ -169,6 +173,33 @@ docker compose exec -T panel php artisan p:user:make \
   --name-last="User" \
   --password="${ADMIN_PASS}" \
   --admin=1
+
+# Save Credentials (New Rule)
+CRED_DIR="/etc/street_preinstallers/credentials"
+mkdir -p "$CRED_DIR"
+cat <<EOF > "$CRED_DIR/pterodactyl.txt"
+====================================================
+Painel Pterodactyl - Credenciais de Acesso
+Gerado em: $(date)
+====================================================
+
+Painel (Admin Inicial):
+URL: http://${SERVER_IP}:8080
+Email: admin@example.com
+Username: admin
+Senha: ${ADMIN_PASS}
+
+Banco de Dados (MariaDB):
+Database: panel
+Username: pterodactyl
+Password: ${MYSQL_PASSWORD}
+Root Password: ${MYSQL_ROOT_PASS}
+
+Segurança:
+APP_KEY: ${PTERO_APP_KEY}
+====================================================
+EOF
+chmod 600 "$CRED_DIR/pterodactyl.txt"
 
 # Configure Nginx on host
 log_info "Configurando o reverse proxy do Nginx..."
