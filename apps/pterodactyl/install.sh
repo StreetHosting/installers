@@ -6,29 +6,36 @@ set -e
 # Repository Configuration (Rule 2 & 3)
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
-# Download Shared Utilities
-curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
-source /tmp/logging.sh
-
 # Run in background using systemd-run for persistence
 if [[ "$1" != "--background" ]]; then
-    log_info "Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..."
+    # Ensure log file exists before backgrounding
+    touch /var/log/strt_inst_pterodactyl.log
+    chmod 644 /var/log/strt_inst_pterodactyl.log
+    
+    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..." >> /var/log/strt_inst_pterodactyl.log
     
     # Save the script to a physical file if it was piped or is not in a stable location
     INSTALLER_PATH="/tmp/strt_inst_pterodactyl_exec.sh"
-    cat "$0" > "$INSTALLER_PATH"
+    if [ -f "$0" ] && [[ "$0" == *.sh ]]; then
+        cat "$0" > "$INSTALLER_PATH"
+    else
+        # If piped (bash), download it from the repo
+        curl -fsSL "$REPO_URL/apps/pterodactyl/install.sh" | sed 's/\r$//' > "$INSTALLER_PATH"
+    fi
     chmod +x "$INSTALLER_PATH"
     
     # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
-    systemd-run --unit=strt-inst-pterodactyl --on-active=3 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_pterodactyl.log"
+    systemd-run --unit=strt-inst-pterodactyl --on-active=1 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_pterodactyl.log"
     exit 0
 fi
 
-log_info "Executando em segundo plano. Logs disponíveis em /var/log/strt_inst_pterodactyl.log"
-
-# Ensure log file exists
+# Ensure log file exists (redundancy for background process)
 touch /var/log/strt_inst_pterodactyl.log
 chmod 644 /var/log/strt_inst_pterodactyl.log
+
+# Download Shared Utilities
+curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
+source /tmp/logging.sh
 
 log_info "Iniciando o processo de instalação do Painel Pterodactyl (Bare-Metal)..."
 

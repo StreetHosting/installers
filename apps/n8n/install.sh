@@ -6,10 +6,35 @@
 sleep 15
 
 # Repository Configuration (Rule 2 & 3)
-# Always reference the stable branch for production installers.
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
-# Download Shared Utilities (Rule 21 & 28)
+# Run in background using systemd-run for persistence
+if [[ "$1" != "--background" ]]; then
+    # Ensure log file exists before backgrounding
+    touch /var/log/strt_inst_n8n.log
+    chmod 644 /var/log/strt_inst_n8n.log
+    
+    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..." >> /var/log/strt_inst_n8n.log
+    
+    # Save the script to a physical file if it was piped or is not in a stable location
+    INSTALLER_PATH="/tmp/strt_inst_n8n_exec.sh"
+    if [ -f "$0" ] && [[ "$0" == *.sh ]]; then
+        cat "$0" > "$INSTALLER_PATH"
+    else
+        # If piped (bash), download it from the repo
+        curl -fsSL "$REPO_URL/apps/n8n/install.sh" | sed 's/\r$//' > "$INSTALLER_PATH"
+    fi
+    chmod +x "$INSTALLER_PATH"
+    
+    # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
+    systemd-run --unit=strt-inst-n8n --on-active=1 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_n8n.log"
+    exit 0
+fi
+
+# Ensure log file exists (redundancy for background process)
+touch /var/log/strt_inst_n8n.log
+chmod 644 /var/log/strt_inst_n8n.log
+
 # Download Shared Utilities
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
 curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.sh
@@ -17,26 +42,6 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 # Source Utilities
 source /tmp/logging.sh
 source /tmp/docker.sh
-
-# Run in background using systemd-run for persistence
-if [[ "$1" != "--background" ]]; then
-    log_info "Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..."
-    
-    # Save the script to a physical file if it was piped or is not in a stable location
-    INSTALLER_PATH="/tmp/strt_inst_n8n_exec.sh"
-    cat "$0" > "$INSTALLER_PATH"
-    chmod +x "$INSTALLER_PATH"
-    
-    # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
-    systemd-run --unit=strt-inst-n8n --on-active=3 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_n8n.log"
-    exit 0
-fi
-
-log_info "Executando em segundo plano. Logs disponíveis em /var/log/strt_inst_n8n.log"
-
-# Ensure log file exists
-touch /var/log/strt_inst_n8n.log
-chmod 644 /var/log/strt_inst_n8n.log
 
 log_info "Iniciando o processo de instalação do n8n..."
 
