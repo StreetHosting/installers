@@ -295,6 +295,10 @@ if [[ $CONF_DOMAIN =~ ^[Ss]$ ]]; then
     read -p "Pressione [Enter] assim que o DNS estiver apontado..."
     
     echo "Gerando certificado SSL com Let's Encrypt..."
+    # Update server_name in nginx config BEFORE running certbot to ensure it matches
+    sed -i "s/server_name .*/server_name $DOMAIN_NAME;/g" /etc/nginx/sites-available/pterodactyl.conf
+    systemctl reload nginx
+
     if certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email; then
         echo "SSL configurado com sucesso!"
         
