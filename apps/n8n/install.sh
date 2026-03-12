@@ -3,7 +3,8 @@
 
 # Network Initialization (Rule 9)
 # Assume the network may not be fully ready at boot.
-sleep 15
+log_info "Waiting for network to initialize..."
+# sleep 15 # -> Removed temporarily for testing (just for debugging!)
 
 # Repository Configuration (Rule 2 & 3)
 # Always reference the stable branch for production installers.
