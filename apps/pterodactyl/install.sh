@@ -139,9 +139,13 @@ COUNT=0
 # Temporarily disable set -e to handle migration retry logic
 set +e
 
-# Install mysql client inside the container (required for schema loading in some versions)
-log_info "Garantindo a presença do cliente MySQL no container do Painel..."
-docker compose exec -T panel apk add --no-cache mariadb-client
+# Install mysql client inside the container (required for schema loading)
+# We do this in a loop to ensure the container is ready to accept commands
+log_info "Instalando cliente MariaDB no container para permitir migrações..."
+until docker compose exec -T panel apk add --no-cache mariadb-client; do
+    log_info "Aguardando container estar pronto para instalar dependências..."
+    sleep 5
+done
 
 until docker compose exec -T panel php artisan migrate --seed --force; do
     COUNT=$((COUNT + 1))
