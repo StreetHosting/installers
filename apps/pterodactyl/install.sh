@@ -3,9 +3,6 @@
 
 set -e
 
-# Network Initialization (Rule 9)
-sleep 15
-
 # Repository Configuration (Rule 2 & 3)
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
@@ -16,8 +13,14 @@ source /tmp/logging.sh
 # Run in background using systemd-run for persistence
 if [[ "$1" != "--background" ]]; then
     log_info "Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..."
+    
+    # Save the script to a physical file if it was piped or is not in a stable location
+    INSTALLER_PATH="/tmp/strt_inst_pterodactyl_exec.sh"
+    cat "$0" > "$INSTALLER_PATH"
+    chmod +x "$INSTALLER_PATH"
+    
     # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
-    systemd-run --unit=strt-inst-pterodactyl --on-active=3 --timer-property=AccuracySec=1s bash -c "/bin/bash $0 --background &>> /var/log/strt_inst_pterodactyl.log"
+    systemd-run --unit=strt-inst-pterodactyl --on-active=3 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_pterodactyl.log"
     exit 0
 fi
 

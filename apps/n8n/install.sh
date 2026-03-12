@@ -21,8 +21,14 @@ source /tmp/docker.sh
 # Run in background using systemd-run for persistence
 if [[ "$1" != "--background" ]]; then
     log_info "Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..."
+    
+    # Save the script to a physical file if it was piped or is not in a stable location
+    INSTALLER_PATH="/tmp/strt_inst_n8n_exec.sh"
+    cat "$0" > "$INSTALLER_PATH"
+    chmod +x "$INSTALLER_PATH"
+    
     # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
-    systemd-run --unit=strt-inst-n8n --on-active=3 --timer-property=AccuracySec=1s bash -c "/bin/bash $0 --background &>> /var/log/strt_inst_n8n.log"
+    systemd-run --unit=strt-inst-n8n --on-active=3 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_n8n.log"
     exit 0
 fi
 
