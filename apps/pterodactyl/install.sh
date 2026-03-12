@@ -1,23 +1,19 @@
-# Pterodactyl Panel Installer for VirtFusion
+# Pterodactyl Panel Installer (Bare-Metal) for VirtFusion
 # This script is designed to run non-interactively within a Cloud-Init context.
 
 set -e
 
 # Network Initialization (Rule 9)
-# sleep 15 # Removed temporarily for testing (just for debugging!)
+sleep 15
 
 # Repository Configuration (Rule 2 & 3)
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
-# Download Shared Utilities (Rule 21 & 28)
+# Download Shared Utilities
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
-curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.sh
-
-# Source Utilities
 source /tmp/logging.sh
-source /tmp/docker.sh
 
-log_info "Iniciando o processo de instalação do Painel Pterodactyl..."
+log_info "Iniciando o processo de instalação do Painel Pterodactyl (Bare-Metal)..."
 
 # OS Detection & Validation (Rule 4)
 if [ -f /etc/os-release ]; then
@@ -34,139 +30,102 @@ if ! command -v apt-get >/dev/null 2>&1; then
     exit 1
 fi
 
-# Install basic dependencies
-log_info "Instalando dependências básicas..."
+# Update and install basic tools
+log_info "Atualizando o sistema e instalando ferramentas básicas..."
 DEBIAN_FRONTEND=noninteractive apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y openssl curl gnupg
+DEBIAN_FRONTEND=noninteractive apt-get install -y openssl curl gnupg2 ca-certificates lsb-release apt-transport-https software-properties-common git tar unzip
 
-# Install Docker (Rule 6 & 7)
-install_docker
+# Setup MariaDB Repository
+log_info "Configurando repositório do MariaDB..."
+if [[ "$ID" == "ubuntu" ]]; then
+    # Ubuntu 24.04 (Noble) has MariaDB 10.11+ in main repos
+    # Ubuntu 22.04 (Jammy) has 10.6, which is fine, but we prefer 10.11
+    if [[ "$VERSION_ID" != "24.04" ]]; then
+        curl -LsSo /etc/apt/trusted.gpg.d/mariadb.gpg https://mariadb.org/mariadb_release_signing_key.asc
+        add-apt-repository -y "deb [arch=amd64,arm64] https://mirror.mariadb.org/repo/10.11/ubuntu $VERSION_CODENAME main"
+    fi
+elif [[ "$ID" == "debian" ]]; then
+    curl -LsSo /etc/apt/trusted.gpg.d/mariadb.gpg https://mariadb.org/mariadb_release_signing_key.asc
+    add-apt-repository -y "deb [arch=amd64,arm64] https://mirror.mariadb.org/repo/10.11/debian $VERSION_CODENAME main"
+fi
 
-# Install Nginx on host for reverse proxy
-log_info "Instalando Nginx no host para o reverse proxy..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot python3-certbot-nginx
+# Setup PHP 8.3 Repository
+log_info "Configurando repositório do PHP 8.3..."
+if [[ "$ID" == "ubuntu" ]]; then
+    if [[ "$VERSION_ID" != "24.04" ]]; then
+        add-apt-repository -y ppa:ondrej/php
+    fi
+elif [[ "$ID" == "debian" ]]; then
+    curl -sSLo /usr/share/keyrings/deb.sury.org-php.gpg https://packages.sury.org/php/apt.gpg
+    echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $VERSION_CODENAME main" > /etc/apt/sources.list.d/php.list
+fi
 
-# Application Isolation & Data Persistence (Rule 27 & 31)
-APP_DIR="/opt/apps/pterodactyl"
-log_info "Configurando o diretório da aplicação: $APP_DIR"
-mkdir -p "$APP_DIR/var"
-mkdir -p "$APP_DIR/nginx"
-mkdir -p "$APP_DIR/db"
+DEBIAN_FRONTEND=noninteractive apt-get update -y
 
-# Ensure correct permissions for Pterodactyl (UID 82 for Alpine-based ghcr image)
-chown -R 82:82 "$APP_DIR/var"
+# Install Dependencies (Rule 11)
+log_info "Instalando PHP 8.3, MariaDB, Redis e Nginx..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3 php8.3-common php8.3-cli php8.3-gd php8.3-mysql php8.3-mbstring php8.3-bcmath php8.3-xml php8.3-curl php8.3-zip php8.3-fpm php8.3-intl php8.3-sqlite3 mariadb-server redis-server nginx certbot python3-certbot-nginx
 
-cd "$APP_DIR"
+# Start and Enable Services
+systemctl enable --now mariadb
+systemctl enable --now redis-server
+systemctl enable --now nginx
+systemctl enable --now php8.3-fpm
 
-# Get Public IP for configuration
-SERVER_IP=$(curl -s https://ifconfig.me || echo "SERVER_IP")
-
-# Generate Random Passwords (Rule 5)
+# Database Setup
+log_info "Configurando o banco de dados..."
 MYSQL_ROOT_PASS=$(openssl rand -hex 16)
-MYSQL_PASSWORD=$(openssl rand -hex 16)
-# Pterodactyl requires a 32-character base64 encoded key for AES-256-CBC
-PTERO_APP_KEY="base64:$(openssl rand -base64 32)"
+MYSQL_PTERO_PASS=$(openssl rand -hex 16)
 
-log_info "Gerando a configuração do Docker Compose..."
-cat <<EOF > docker-compose.yml
-services:
-  database:
-    image: mariadb:10.11
-    restart: always
-    command: --default-authentication-plugin=mysql_native_password
-    volumes:
-      - ./db:/var/lib/mysql
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-      - MYSQL_DATABASE=panel
-      - MYSQL_USER=pterodactyl
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-
-  cache:
-    image: redis:7-alpine
-    restart: always
-
-  panel:
-    image: ghcr.io/pterodactyl/panel:latest
-    restart: always
-    ports:
-      - "8080:80"
-    links:
-      - database
-      - cache
-    volumes:
-      - ./var/:/app/var/
-      - /etc/localtime:/etc/localtime:ro
-    environment:
-      - APP_URL=http://${SERVER_IP}:8080
-      - APP_TIMEZONE=UTC
-      - APP_SERVICE_AUTHOR=admin@example.com
-      - APP_KEY=${PTERO_APP_KEY}
-      - DB_HOST=database
-      - DB_PORT=3306
-      - DB_DATABASE=panel
-      - DB_USERNAME=pterodactyl
-      - DB_PASSWORD=${MYSQL_PASSWORD}
-      - CACHE_DRIVER=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-      - REDIS_HOST=cache
-      - REDIS_PORT=6379
+# Secure MariaDB
+mysql -u root <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASS}';
+CREATE DATABASE IF NOT EXISTS panel;
+CREATE USER IF NOT EXISTS 'pterodactyl'@'localhost' IDENTIFIED BY '${MYSQL_PTERO_PASS}';
+GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'localhost' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
 EOF
 
-# Start Application (Rule 23)
-log_info "Iniciando os containers do Painel Pterodactyl..."
-if ! docker compose up -d; then
-    log_error "O Docker Compose falhou ao iniciar a stack."
-    exit 1
-fi
+# Install Composer
+log_info "Instalando Composer..."
+curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Initializing Pterodactyl (Create User and migrate)
-log_info "Executando migrações e configuração inicial (isso pode levar um minuto)..."
+# Download Pterodactyl (Rule 14 & User request)
+log_info "Baixando o Painel Pterodactyl em /var/www/pterodactyl..."
+mkdir -p /var/www/pterodactyl
+cd /var/www/pterodactyl
+curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
+tar -xzvf panel.tar.gz
+chmod -R 755 storage/* bootstrap/cache/
 
-# Wait for containers to be ready and install dependencies
-log_info "Aguardando os containers e instalando cliente MariaDB..."
-MAX_RETRIES=30
-COUNT=0
-# Temporarily disable set -e to handle migration retry logic
-set +e
+# Configure Environment
+log_info "Configurando ambiente (.env)..."
+SERVER_IP=$(curl -s https://ifconfig.me || echo "SERVER_IP")
+PTERO_APP_KEY="base64:$(openssl rand -base64 32)"
 
-# Install mysql client inside the container (required for schema loading)
-# We do this in a loop with a limit to avoid blocking the system forever
-until docker compose exec -T panel apk add --no-cache mariadb-client || [ $COUNT -eq $MAX_RETRIES ]; do
-    COUNT=$((COUNT + 1))
-    log_info "Aguardando container estar pronto para instalar dependências... ($COUNT/$MAX_RETRIES)"
-    sleep 10
-done
+cp .env.example .env
+sed -i "s|APP_URL=.*|APP_URL=http://${SERVER_IP}|g" .env
+sed -i "s|APP_KEY=.*|APP_KEY=${PTERO_APP_KEY}|g" .env
+sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${MYSQL_PTERO_PASS}|g" .env
+sed -i "s|DB_USERNAME=.*|DB_USERNAME=pterodactyl|g" .env
+sed -i "s|CACHE_DRIVER=.*|CACHE_DRIVER=redis|g" .env
+sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=redis|g" .env
+sed -i "s|QUEUE_CONNECTION=.*|QUEUE_CONNECTION=redis|g" .env
+sed -i "s|REDIS_HOST=.*|REDIS_HOST=127.0.0.1|g" .env
 
-if [ $COUNT -eq $MAX_RETRIES ]; then
-    log_error "O container do Painel não ficou pronto a tempo. Abortando para evitar bloqueio do sistema."
-    docker compose logs panel
-    exit 1
-fi
+# Install PHP Dependencies
+log_info "Executando composer install..."
+export COMPOSER_ALLOW_SUPERUSER=1
+composer install --no-dev --optimize-autoloader
 
-# Reset count for migrations
-COUNT=0
-until docker compose exec -T panel php artisan migrate --seed --force || [ $COUNT -eq $MAX_RETRIES ]; do
-    COUNT=$((COUNT + 1))
-    log_info "Aguardando o banco de dados e containers para migração... ($COUNT/$MAX_RETRIES)"
-    sleep 10
-done
+# Run Migrations and Seeders
+log_info "Executando migrações do banco de dados..."
+php artisan migrate --seed --force
 
-if [ $COUNT -eq $MAX_RETRIES ]; then
-    log_error "As migrações falharam após $MAX_RETRIES tentativas."
-    docker compose logs database
-    exit 1
-fi
-
-# Ensure permissions again after migrations (Pterodactyl sometimes creates new files)
-docker compose exec -T panel chown -R www-data:www-data /app/storage /app/bootstrap/cache
-set -e
-
-# Create Initial Admin User (non-interactive)
+# Create Initial Admin User
 log_info "Criando usuário administrador inicial..."
 ADMIN_PASS=$(openssl rand -hex 8)
-docker compose exec -T panel php artisan p:user:make \
+php artisan p:user:make \
   --email="admin@example.com" \
   --username="admin" \
   --name-first="Admin" \
@@ -174,17 +133,101 @@ docker compose exec -T panel php artisan p:user:make \
   --password="${ADMIN_PASS}" \
   --admin=1
 
-# Save Credentials (New Rule)
+# Set Permissions
+log_info "Configurando permissões (www-data)..."
+chown -R www-data:www-data /var/www/pterodactyl/*
+
+# Setup Crontab
+log_info "Configurando Crontab..."
+(crontab -l 2>/dev/null; echo "* * * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1") | crontab -
+
+# Setup Queue Worker (Systemd)
+log_info "Configurando Queue Worker (pteroq.service)..."
+cat <<EOF > /etc/systemd/system/pteroq.service
+# Pterodactyl Queue Worker File
+# ----------------------------------
+
+[Unit]
+Description=Pterodactyl Queue Worker
+After=network.target
+
+[Service]
+# On some systems the user and group might be different.
+# Some systems use `apache` or `nginx` as the user and group.
+User=www-data
+Group=www-data
+Restart=always
+ExecStart=/usr/bin/php /var/www/pterodactyl/artisan queue:work --queue=high,standard,low --sleep=3 --tries=3
+StartLimitInterval=180
+StartLimitBurst=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable --now pteroq.service
+
+# Configure Nginx
+log_info "Configurando Nginx..."
+cat <<EOF > /etc/nginx/sites-available/pterodactyl.conf
+server {
+    listen 80;
+    server_name ${SERVER_IP};
+
+    root /var/www/pterodactyl/public;
+    index index.php;
+
+    access_log /var/log/nginx/pterodactyl.app-access.log;
+    error_log  /var/log/nginx/pterodactyl.app-error.log error;
+
+    # allow larger file uploads and longer script runtimes
+    client_max_body_size 100m;
+    client_body_timeout 120s;
+
+    sendfile off;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param PHP_VALUE "upload_max_filesize = 100M \n post_max_size=100M";
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_param HTTP_PROXY "";
+        fastcgi_intercept_errors off;
+        fastcgi_buffer_size 16k;
+        fastcgi_buffers 4 16k;
+        fastcgi_connect_timeout 300;
+        fastcgi_send_timeout 300;
+        fastcgi_read_timeout 300;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+
+ln -sf /etc/nginx/sites-available/pterodactyl.conf /etc/nginx/sites-enabled/pterodactyl.conf
+rm -f /etc/nginx/sites-enabled/default
+systemctl restart nginx
+
+# Save Credentials
+log_info "Salvando credenciais em /etc/street_preinstallers/credentials/pterodactyl.txt..."
 CRED_DIR="/etc/street_preinstallers/credentials"
 mkdir -p "$CRED_DIR"
 cat <<EOF > "$CRED_DIR/pterodactyl.txt"
 ====================================================
-Painel Pterodactyl - Credenciais de Acesso
+Painel Pterodactyl (Bare-Metal) - Credenciais
 Gerado em: $(date)
 ====================================================
 
 Painel (Admin Inicial):
-URL: http://${SERVER_IP}:8080
+URL: http://${SERVER_IP}
 Email: admin@example.com
 Username: admin
 Senha: ${ADMIN_PASS}
@@ -192,37 +235,18 @@ Senha: ${ADMIN_PASS}
 Banco de Dados (MariaDB):
 Database: panel
 Username: pterodactyl
-Password: ${MYSQL_PASSWORD}
+Password: ${MYSQL_PTERO_PASS}
 Root Password: ${MYSQL_ROOT_PASS}
 
+Caminho da Instalação: /var/www/pterodactyl
 Segurança:
 APP_KEY: ${PTERO_APP_KEY}
 ====================================================
 EOF
 chmod 600 "$CRED_DIR/pterodactyl.txt"
 
-# Configure Nginx on host
-log_info "Configurando o reverse proxy do Nginx..."
-cat <<EOF > /etc/nginx/sites-available/pterodactyl
-server {
-    listen 80;
-    server_name ${SERVER_IP};
-
-    location / {
-        proxy_pass http://localhost:8080;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Host \$http_host;
-    }
-}
-EOF
-ln -sf /etc/nginx/sites-available/pterodactyl /etc/nginx/sites-enabled/pterodactyl
-rm -f /etc/nginx/sites-enabled/default
-systemctl restart nginx
-
 # Create the Post-Install Setup Script
-log_info "Criando script de configuração inicial (primeiro login)..."
+log_info "Criando script de configuração final (Domínio/SSL)..."
 cat <<'EOF_SETUP' > /usr/local/bin/pterodactyl-setup
 #!/bin/bash
 
@@ -248,13 +272,10 @@ if [[ $CONF_DOMAIN =~ ^[Ss]$ ]]; then
     if certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email; then
         echo "SSL configurado com sucesso!"
         
-        # Update Pterodactyl APP_URL
-        cd /opt/apps/pterodactyl
-        sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN_NAME|g" docker-compose.yml
-        docker compose up -d
-        
-        echo "Atualizando configuração do Pterodactyl..."
-        docker compose exec -T panel php artisan p:environment:setup --url="https://$DOMAIN_NAME"
+        # Update Pterodactyl config
+        cd /var/www/pterodactyl
+        sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN_NAME|g" .env
+        php artisan p:environment:setup --url="https://$DOMAIN_NAME"
         
         echo "Sucesso! Seu painel agora está disponível em https://$DOMAIN_NAME"
     else
@@ -283,11 +304,4 @@ fi
 
 log_success "Instalação do Painel Pterodactyl concluída!"
 log_success "Acesso: http://${SERVER_IP}"
-log_success "Credenciais Iniciais do Administrador:"
-log_success "Email: admin@example.com"
-log_success "Senha: ${ADMIN_PASS}"
-log_info "-------------------------------------------"
-log_info "Senha Root do MySQL: ${MYSQL_ROOT_PASS}"
-log_info "Senha do Usuário MySQL: ${MYSQL_PASSWORD}"
-log_info "-------------------------------------------"
-log_info "A configuração de Domínio/SSL será solicitada no próximo login SSH."
+log_success "Credenciais salvas em: $CRED_DIR/pterodactyl.txt"
