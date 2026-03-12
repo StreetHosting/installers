@@ -60,7 +60,8 @@ SERVER_IP=$(curl -s https://ifconfig.me || echo "SERVER_IP")
 # Generate Random Passwords (Rule 5)
 MYSQL_ROOT_PASS=$(openssl rand -hex 16)
 MYSQL_PASSWORD=$(openssl rand -hex 16)
-PTERO_APP_KEY=$(openssl rand -base64 32)
+# Pterodactyl requires a 32-character base64 encoded key for AES-256-CBC
+PTERO_APP_KEY="base64:$(openssl rand -base64 32)"
 
 log_info "Gerando a configuração do Docker Compose..."
 cat <<EOF > docker-compose.yml
