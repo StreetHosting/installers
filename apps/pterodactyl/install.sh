@@ -77,19 +77,31 @@ services:
       - MYSQL_DATABASE=panel
       - MYSQL_USER=pterodactyl
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASS}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   cache:
     image: redis:7-alpine
     restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
     ports:
       - "8080:80"
-    links:
-      - database
-      - cache
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
     volumes:
       - ./var/:/app/var/
       - /etc/localtime:/etc/localtime:ro
@@ -119,19 +131,24 @@ fi
 
 # Initializing Pterodactyl (Create User and migrate)
 log_info "Executando migrações e configuração inicial (isso pode levar um minuto)..."
-# Wait for DB to be ready
-MAX_RETRIES=10
-COUNT=0
-until docker compose exec -T panel php artisan migrate --seed --force || [ $COUNT -eq $MAX_RETRIES ]; do
-    sleep 10
-    COUNT=$((COUNT + 1))
-    log_info "Aguardando o banco de dados ficar pronto... ($COUNT/$MAX_RETRIES)"
-done
 
-if [ $COUNT -eq $MAX_RETRIES ]; then
-    log_error "As migrações falharam. O banco de dados pode não estar pronto ou há um erro de configuração."
-    exit 1
-fi
+# Wait for containers to be ready
+log_info "Aguardando os containers ficarem prontos..."
+MAX_RETRIES=20
+COUNT=0
+# Temporarily disable set -e to handle migration retry logic
+set +e
+until docker compose exec -T panel php artisan migrate --seed --force; do
+    COUNT=$((COUNT + 1))
+    if [ $COUNT -eq $MAX_RETRIES ]; then
+        log_error "As migrações falharam após $MAX_RETRIES tentativas. Verifique os logs do banco de dados."
+        docker compose logs database
+        exit 1
+    fi
+    log_info "Aguardando o banco de dados e containers... ($COUNT/$MAX_RETRIES)"
+    sleep 10
+done
+set -e
 
 # Create Initial Admin User (non-interactive)
 # Pterodactyl doesn't have a non-interactive artisan command for user creation with all fields.
