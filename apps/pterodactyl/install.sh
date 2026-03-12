@@ -315,9 +315,11 @@ if [[ $CONF_DOMAIN =~ ^[Ss]$ ]]; then
             --queue="redis" \
             --redis-host="127.0.0.1" \
             --redis-port="6379" \
+            --redis-pass="" \
             --settings-ui=true \
             --telemetry=false \
-            --author="admin@example.com"
+            --author="admin@example.com" \
+            --no-interaction
         
         # Update Credentials file with new URL
         CRED_FILE="/etc/street_preinstallers/credentials/pterodactyl.txt"
@@ -334,6 +336,7 @@ fi
 touch /root/.pterodactyl_setup_done
 echo ""
 echo "Configuração concluída. Você já pode acessar seu painel."
+echo "As credenciais de acesso estão em: /etc/street_preinstallers/credentials/pterodactyl.txt"
 echo "===================================================="
 EOF_SETUP
 
