@@ -83,7 +83,7 @@ _get_access_url() {
 echo ""
 
 if command -v figlet >/dev/null 2>&1; then
-    figlet -f small "STREETHOSTING" 2>/dev/null | awk '
+    figlet -f speed "STREETHOSTING" 2>/dev/null | awk '
     {
         lines[NR] = $0
         len = length($0)
@@ -148,6 +148,7 @@ printf "  \033[2;38;2;100;100;100m───────────────�
 echo ""
 printf "  \033[38;2;200;200;200mStatus da instalação:\033[0m\n"
 printf "    \033[2mtail -20 %s\033[0m\n" "$LOG_FILE"
+printf "    \033[2mem tempo real, use: tail -f %s\033[0m\n" "$LOG_FILE  "
 echo ""
 printf "  \033[38;2;200;200;200mCredenciais de acesso:\033[0m\n"
 printf "    \033[2mcat %s\033[0m\n" "$CRED_FILE"

@@ -159,7 +159,7 @@ php artisan migrate --seed --force
 log_info "Criando usuário administrador inicial..."
 ADMIN_PASS=$(openssl rand -hex 8)
 php artisan p:user:make \
-  --email="admin@example.com" \
+  --email="admin@streetworks.com.br" \
   --username="admin" \
   --name-first="Admin" \
   --name-last="User" \
@@ -261,7 +261,7 @@ Gerado em: $(date)
 
 Painel (Admin Inicial):
 URL: http://${SERVER_IP}
-Email: admin@example.com
+Email: admin@streetworks.com.br
 Username: admin
 Senha: ${ADMIN_PASS}
 
@@ -277,6 +277,192 @@ APP_KEY: ${PTERO_APP_KEY}
 ====================================================
 EOF
 chmod 600 "$CRED_DIR/pterodactyl.txt"
+
+# Assistente de Configuração de Domínio
+log_info "Instalando assistente de configuração de domínio..."
+cat <<'EOF_DOMAIN_SETUP' > /usr/local/bin/street-domain-setup
+#!/bin/bash
+# StreetHosting - Assistente de Configuração de Domínio (Pterodactyl)
+
+if [ "$(id -u)" -ne 0 ]; then
+    printf "\033[38;2;255;60;60mEste assistente precisa ser executado como root.\033[0m\n"
+    exit 1
+fi
+
+if [ "$1" != "--force" ] && [ -f /root/.street_domain_setup_done ]; then
+    exit 0
+fi
+
+if [ "$1" != "--force" ]; then
+    if ! grep -q "\[SUCCESS\]" /var/log/strt_inst_pterodactyl.log 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+RST="\033[0m"
+BLD="\033[1m"
+DIM="\033[2m"
+GOLD="\033[38;2;255;200;0m"
+ORANGE="\033[38;2;255;165;0m"
+YELLOW="\033[38;2;255;245;60m"
+GREEN="\033[38;2;0;200;80m"
+RED="\033[38;2;255;60;60m"
+WHITE="\033[38;2;240;240;240m"
+GRAY="\033[38;2;120;120;120m"
+CYAN="\033[38;2;0;190;210m"
+SEP_CLR="\033[38;2;60;60;60m"
+
+_tw() {
+    local text="$1" delay="${2:-0.015}"
+    for ((i=0; i<${#text}; i++)); do
+        printf "%s" "${text:$i:1}"
+        sleep "$delay"
+    done
+}
+
+_sep() {
+    printf "  ${SEP_CLR}"
+    for ((i=0; i<54; i++)); do printf "─"; done
+    printf "${RST}\n"
+}
+
+_spin() {
+    local pid=$1 msg="$2"
+    local -a frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    local i=0 len=${#frames[@]}
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  ${GOLD}%s${RST} %b" "${frames[$i]}" "$msg"
+        i=$(( (i + 1) % len ))
+        sleep 0.08
+    done
+    wait "$pid"
+    return $?
+}
+
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$SERVER_IP" ] && SERVER_IP=$(curl -s https://ifconfig.me 2>/dev/null || echo "IP_DESCONHECIDO")
+
+CURRENT_URL=""
+if [ -f /var/www/pterodactyl/.env ]; then
+    CURRENT_URL=$(grep -E '^APP_URL=' /var/www/pterodactyl/.env 2>/dev/null | sed 's/^APP_URL=//')
+fi
+[ -z "$CURRENT_URL" ] && CURRENT_URL="http://${SERVER_IP}"
+
+echo ""
+_sep
+echo ""
+printf "  ${BLD}${GOLD}"
+_tw "✦  Configuração de Domínio" 0.025
+printf "${RST}\n"
+printf "  ${DIM}${GRAY}"
+_tw "   Painel Pterodactyl" 0.02
+printf "${RST}\n"
+echo ""
+_sep
+echo ""
+printf "  ${WHITE}Seu painel está acessível em:${RST}\n"
+printf "  ${BLD}${CYAN}  → %s${RST}\n" "$CURRENT_URL"
+echo ""
+printf "  ${WHITE}Para usar um domínio personalizado,${RST}\n"
+printf "  ${WHITE}crie um registro DNS tipo ${BLD}A${RST}${WHITE} apontando para:${RST}\n"
+printf "  ${BLD}${YELLOW}  → %s${RST}\n" "$SERVER_IP"
+echo ""
+_sep
+echo ""
+
+read -p "$(printf "  ${BLD}${GOLD}Deseja configurar um domínio?${RST} ${DIM}(s/n)${RST}: ")" CONF_DOMAIN
+echo ""
+
+if [[ ! $CONF_DOMAIN =~ ^[Ss]$ ]]; then
+    touch /root/.street_domain_setup_done
+    printf "  ${DIM}${GRAY}Você pode executar este assistente novamente com:${RST}\n"
+    printf "  ${GOLD}  street-domain-setup --force${RST}\n"
+    echo ""
+    exit 0
+fi
+
+read -p "$(printf "  ${BLD}${GOLD}Digite seu domínio${RST} ${DIM}(ex: painel.exemplo.com)${RST}: ")" DOMAIN_NAME
+echo ""
+
+if [ -z "$DOMAIN_NAME" ]; then
+    printf "  ${RED}Domínio não informado. Operação cancelada.${RST}\n\n"
+    exit 1
+fi
+
+printf "  ${ORANGE}⚠${RST}  ${WHITE}Certifique-se de que ${BLD}%s${RST}${WHITE} aponta para ${BLD}%s${RST}\n" "$DOMAIN_NAME" "$SERVER_IP"
+echo ""
+read -p "$(printf "  ${DIM}Pressione ${RST}${BLD}[Enter]${RST}${DIM} quando o DNS estiver configurado...${RST}")"
+echo ""
+echo ""
+
+(
+    sed -i "s/server_name .*/server_name $DOMAIN_NAME;/g" /etc/nginx/sites-available/pterodactyl.conf
+    systemctl reload nginx
+) &>/dev/null &
+_spin $! "${WHITE}Configurando Nginx...${RST}"
+if [ $? -eq 0 ]; then
+    printf "\r  ${GREEN}✓${RST} ${WHITE}Nginx configurado!${RST}                                          \n"
+else
+    printf "\r  ${RED}✗${RST} ${WHITE}Falha ao configurar Nginx.${RST}                                  \n"
+fi
+
+(
+    certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email
+) &>/dev/null &
+_spin $! "${WHITE}Gerando certificado SSL com Let's Encrypt...${RST}"
+CERT_EXIT=$?
+
+if [ $CERT_EXIT -eq 0 ]; then
+    printf "\r  ${GREEN}✓${RST} ${WHITE}Certificado SSL instalado!${RST}                                  \n"
+    NEW_URL="https://$DOMAIN_NAME"
+else
+    printf "\r  ${RED}✗${RST} ${WHITE}Falha ao gerar SSL. Usando HTTP.${RST}                             \n"
+    printf "  ${DIM}${GRAY}  Verifique se o DNS está correto e tente novamente.${RST}\n"
+    NEW_URL="http://$DOMAIN_NAME"
+fi
+
+(
+    cd /var/www/pterodactyl
+    sed -i "s|APP_URL=.*|APP_URL=$NEW_URL|g" .env
+    php artisan config:clear
+    php artisan route:clear
+    php artisan cache:clear
+) &>/dev/null &
+_spin $! "${WHITE}Atualizando configuração do Pterodactyl...${RST}"
+printf "\r  ${GREEN}✓${RST} ${WHITE}Pterodactyl atualizado!${RST}                                      \n"
+
+CRED_FILE="/etc/street_preinstallers/credentials/pterodactyl.txt"
+if [ -f "$CRED_FILE" ]; then
+    sed -i "s|URL: .*|URL: $NEW_URL|g" "$CRED_FILE"
+fi
+
+echo ""
+_sep
+echo ""
+printf "  ${BLD}${GREEN}"
+_tw "✓ Configuração concluída!" 0.025
+printf "${RST}\n"
+echo ""
+printf "  ${WHITE}Seu painel está disponível em:${RST}\n"
+printf "  ${BLD}${CYAN}  → %s${RST}\n" "$NEW_URL"
+echo ""
+_sep
+echo ""
+
+touch /root/.street_domain_setup_done
+EOF_DOMAIN_SETUP
+
+chmod +x /usr/local/bin/street-domain-setup
+
+if ! grep -q "street-domain-setup" /root/.bashrc; then
+    cat <<'EOF_BASHRC' >> /root/.bashrc
+
+# StreetHosting - Assistente de Domínio
+if [[ $- == *i* ]] && [ -x /usr/local/bin/street-domain-setup ]; then
+    /usr/local/bin/street-domain-setup
+fi
+EOF_BASHRC
+fi
 
 log_success "Instalação do Painel Pterodactyl concluída!"
 log_success "Acesso: http://${SERVER_IP}"
