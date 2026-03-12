@@ -3,7 +3,8 @@
 
 # Network Initialization (Rule 9)
 # Assume the network may not be fully ready at boot.
-sleep 15
+log_info "Waiting for network to initialize..."
+# sleep 15 # -> Removed temporarily for testing (just for debugging!)
 
 # Repository Configuration (Rule 2 & 3)
 # Always reference the stable branch for production installers.
@@ -42,7 +43,9 @@ install_docker
 # Application Isolation & Data Persistence (Rule 27 & 31)
 APP_DIR="/opt/apps/n8n"
 log_info "Setting up application directory: $APP_DIR"
-mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR/n8n_data"
+# Ensure the data directory is writable by n8n user (UID 1000)
+chown -R 1000:1000 "$APP_DIR/n8n_data"
 cd "$APP_DIR"
 
 # Get Public IP for configuration
@@ -59,25 +62,41 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=${SERVER_IP}
+      - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=production
       - WEBHOOK_URL=http://${SERVER_IP}:5678/
     volumes:
       - ./n8n_data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 EOF
 
 # Start Application (Rule 23)
 log_info "Launching n8n container..."
 docker compose up -d
 
+# Wait for healthy status
+log_info "Waiting for n8n to become healthy..."
+MAX_RETRIES=12
+COUNT=0
+until [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ] || [ $COUNT -eq $MAX_RETRIES ]; do
+    sleep 10
+    COUNT=$((COUNT + 1))
+    log_info "Still waiting... ($COUNT/$MAX_RETRIES)"
+done
+
 # Verify Installation
-if [ "$(docker ps -q -f name=n8n)" ]; then
+if [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ]; then
     log_success "n8n has been successfully installed and started."
     log_success "Access: http://${SERVER_IP}:5678"
     log_success "Port: 5678"
 else
-    log_error "n8n container failed to start."
+    log_error "n8n container failed to start or is not healthy."
+    docker logs n8n --tail 20
     exit 1
 fi
