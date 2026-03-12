@@ -43,6 +43,11 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 source /tmp/logging.sh
 source /tmp/docker.sh
 
+# MOTD Setup (early - atualiza status durante a instalação)
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+source /tmp/motd.sh
+motd_setup "n8n"
+
 log_info "Iniciando o processo de instalação do n8n..."
 
 # OS Detection & Validation (Rule 4)
@@ -217,12 +222,6 @@ EOF
     log_info "Task Runners: Modo Externo Ativado"
     log_info "N8N_SECURE_COOKIE: false (Acesso HTTP Permitido)"
     log_info "-------------------------------------------"
-
-    # MOTD Setup
-    log_info "Configurando MOTD..."
-    curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
-    source /tmp/motd.sh
-    motd_setup "n8n"
 else
     log_error "O container n8n falhou ao iniciar ou não está saudável."
     docker logs n8n --tail 20

@@ -45,6 +45,11 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 source /tmp/logging.sh
 source /tmp/docker.sh
 
+# MOTD Setup (early - atualiza status durante a instalação)
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+source /tmp/motd.sh
+motd_setup "uptime-kuma"
+
 log_info "Iniciando o processo de instalação do Uptime Kuma..."
 
 # OS Detection & Validation (Rule 4)
@@ -115,9 +120,3 @@ chmod 600 "$CRED_DIR/uptime-kuma.txt"
 log_success "Instalação do Uptime Kuma concluída!"
 log_info "Acesso: http://${SERVER_IP}:3001"
 log_info "Porta: 3001"
-
-# MOTD Setup
-log_info "Configurando MOTD..."
-curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
-source /tmp/motd.sh
-motd_setup "uptime-kuma"

@@ -19,6 +19,7 @@ motd_setup() {
 
     if ! command -v figlet >/dev/null 2>&1; then
         log_info "Instalando figlet..."
+        DEBIAN_FRONTEND=noninteractive apt-get update -y >/dev/null 2>&1 || true
         DEBIAN_FRONTEND=noninteractive apt-get install -y figlet >/dev/null 2>&1 || log_warn "Falha ao instalar figlet, o MOTD usará texto simples."
     fi
 
@@ -59,12 +60,23 @@ _get_log_file() {
     esac
 }
 
-_get_default_port() {
+_get_access_url() {
+    local server_ip
+    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -z "$server_ip" ] && server_ip="IP_DO_SERVIDOR"
+
     case "$1" in
-        n8n) echo "5678" ;;
-        uptime-kuma) echo "3001" ;;
-        pterodactyl) echo "80" ;;
-        *) echo "" ;;
+        pterodactyl)
+            if [ -f /var/www/pterodactyl/.env ]; then
+                local app_url
+                app_url=$(grep -E '^APP_URL=' /var/www/pterodactyl/.env 2>/dev/null | sed 's/^APP_URL=//')
+                [ -n "$app_url" ] && { echo "$app_url"; return; }
+            fi
+            echo "http://${server_ip}"
+            ;;
+        n8n) echo "http://${server_ip}:5678" ;;
+        uptime-kuma) echo "http://${server_ip}:3001" ;;
+        *) echo "http://${server_ip}" ;;
     esac
 }
 
@@ -106,10 +118,8 @@ fi
 APP_NAME=$(_get_display_name "$INSTALLED_APP")
 ENV_TAG=$(_get_environment_tag "$INSTALLED_APP")
 LOG_FILE=$(_get_log_file "$INSTALLED_APP")
-PORT=$(_get_default_port "$INSTALLED_APP")
+ACCESS_URL=$(_get_access_url "$INSTALLED_APP")
 CRED_FILE="/etc/street_preinstallers/credentials/${INSTALLED_APP}.txt"
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -z "$SERVER_IP" ] && SERVER_IP="IP_DO_SERVIDOR"
 
 echo ""
 
@@ -118,20 +128,7 @@ if [ -n "$ENV_TAG" ]; then
 fi
 
 printf "  \033[38;2;255;200;0mAplicação:\033[0m  %s\n" "$APP_NAME"
-
-if [ -n "$PORT" ]; then
-    if [ "$PORT" = "80" ]; then
-        printf "  \033[38;2;255;200;0mAcesso:\033[0m     http://%s\n" "$SERVER_IP"
-    elif [ "$PORT" = "443" ]; then
-        printf "  \033[38;2;255;200;0mAcesso:\033[0m     https://%s\n" "$SERVER_IP"
-    else
-        printf "  \033[38;2;255;200;0mAcesso:\033[0m     http://%s:%s\n" "$SERVER_IP" "$PORT"
-    fi
-fi
-
-if [ "$INSTALLED_APP" = "pterodactyl" ]; then
-    printf "  \033[2;38;2;180;180;180m  (configure o domínio com: pterodactyl-setup)\033[0m\n"
-fi
+printf "  \033[38;2;255;200;0mAcesso:\033[0m     %s\n" "$ACCESS_URL"
 
 if [ -f "$LOG_FILE" ]; then
     LAST_LOG=$(grep -E '^\[(SUCCESS|ERROR|INFO)\]' "$LOG_FILE" 2>/dev/null | tail -1)

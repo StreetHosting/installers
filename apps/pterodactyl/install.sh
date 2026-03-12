@@ -37,6 +37,11 @@ chmod 644 /var/log/strt_inst_pterodactyl.log
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
 source /tmp/logging.sh
 
+# MOTD Setup (early - atualiza status durante a instalação)
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+source /tmp/motd.sh
+motd_setup "pterodactyl"
+
 log_info "Iniciando o processo de instalação do Painel Pterodactyl (Bare-Metal)..."
 
 # OS Detection & Validation (Rule 4)
@@ -272,92 +277,6 @@ APP_KEY: ${PTERO_APP_KEY}
 ====================================================
 EOF
 chmod 600 "$CRED_DIR/pterodactyl.txt"
-
-# Create the Post-Install Setup Script
-log_info "Criando script de configuração final (Domínio/SSL)..."
-cat <<'EOF_SETUP' > /usr/local/bin/pterodactyl-setup
-#!/bin/bash
-
-if [ -f /root/.pterodactyl_setup_done ]; then
-    exit 0
-fi
-
-clear
-echo "===================================================="
-echo "    Painel Pterodactyl - Configuração Final"
-echo "===================================================="
-echo ""
-read -p "Deseja configurar um nome de domínio agora? (s/n): " CONF_DOMAIN
-
-if [[ $CONF_DOMAIN =~ ^[Ss]$ ]]; then
-    read -p "Digite seu domínio (ex: painel.exemplo.com): " DOMAIN_NAME
-    
-    echo ""
-    echo "Certifique-se de que seu domínio $DOMAIN_NAME está apontando para o IP desta VPS: $(curl -s https://ifconfig.me)"
-    read -p "Pressione [Enter] assim que o DNS estiver apontado..."
-    
-    echo "Gerando certificado SSL com Let's Encrypt..."
-    # Update server_name in nginx config BEFORE running certbot to ensure it matches
-    sed -i "s/server_name .*/server_name $DOMAIN_NAME;/g" /etc/nginx/sites-available/pterodactyl.conf
-    systemctl reload nginx
-
-    if certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email; then
-        echo "SSL configurado com sucesso!"
-        
-        # Update Pterodactyl config non-interactively
-        cd /var/www/pterodactyl
-        sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN_NAME|g" .env
-        php artisan p:environment:setup \
-            --url="https://$DOMAIN_NAME" \
-            --timezone="America/Sao_Paulo" \
-            --cache="redis" \
-            --session="redis" \
-            --queue="redis" \
-            --redis-host="127.0.0.1" \
-            --redis-port="6379" \
-            --redis-pass="" \
-            --settings-ui=true \
-            --telemetry=false \
-            --author="admin@example.com" \
-            --no-interaction
-        
-        # Update Credentials file with new URL
-        CRED_FILE="/etc/street_preinstallers/credentials/pterodactyl.txt"
-        if [ -f "$CRED_FILE" ]; then
-            sed -i "s|URL: .*|URL: https://$DOMAIN_NAME|g" "$CRED_FILE"
-        fi
-
-        echo "Sucesso! Seu painel agora está disponível em https://$DOMAIN_NAME"
-    else
-        echo "Falha ao gerar o SSL. Verifique seu DNS e tente novamente mais tarde."
-    fi
-fi
-
-touch /root/.pterodactyl_setup_done
-echo ""
-echo "Configuração concluída. Você já pode acessar seu painel."
-echo "As credenciais de acesso estão em: /etc/street_preinstallers/credentials/pterodactyl.txt"
-echo "===================================================="
-EOF_SETUP
-
-chmod +x /usr/local/bin/pterodactyl-setup
-
-# Add hook to .bashrc for root
-if ! grep -q "pterodactyl-setup" /root/.bashrc; then
-    cat <<'EOF_BASHRC' >> /root/.bashrc
-
-# Pterodactyl Setup Hook
-if [[ $- == *i* ]] && [ -x /usr/local/bin/pterodactyl-setup ]; then
-    /usr/local/bin/pterodactyl-setup
-fi
-EOF_BASHRC
-fi
-
-# MOTD Setup
-log_info "Configurando MOTD..."
-curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
-source /tmp/motd.sh
-motd_setup "pterodactyl"
 
 log_success "Instalação do Painel Pterodactyl concluída!"
 log_success "Acesso: http://${SERVER_IP}"
