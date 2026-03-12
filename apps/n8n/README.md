@@ -8,16 +8,21 @@ n8n is an extendable workflow automation tool that allows you to connect anythin
 ## Installation Behavior
 - Detects the operating system (Ubuntu/Debian supported).
 - Installs Docker and Docker Compose if not already present.
-- Configures n8n to run within a Docker container.
-- Sets up data persistence in `/opt/apps/n8n/n8n_data`.
+- Configures a full n8n stack:
+    - **n8n**: The main automation engine.
+    - **PostgreSQL 16**: Used as the primary database for better performance and scalability.
+    - **Task Runners (External)**: Executes Code nodes (JS/Python) in isolated containers for security.
+- Sets up data persistence in `/opt/apps/n8n/n8n_data` and `/opt/apps/n8n/postgres_data`.
 - Automatically retrieves the public IP for initial configuration.
+- Configures `N8N_SECURE_COOKIE=false` to allow access via HTTP (useful for initial setup without SSL).
 
 ## Exposed Ports
-- **5678**: The default n8n web interface and webhook port.
+- **5678**: The main n8n web interface and webhook port.
 
 ## Runtime Environment
-- **Docker**: Official n8n container image.
-- **Docker Compose**: Used for service orchestration and restart policies.
+- **Docker**: Official n8n, runners, and postgres container images.
+- **Docker Compose**: Used for full stack orchestration and health-based dependencies.
+- **Security**: Randomly generated passwords for PostgreSQL and secure tokens for Task Runners.
 
 ## Access Instructions
 Once the provisioning script completes:
