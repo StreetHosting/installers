@@ -353,6 +353,12 @@ fi
 EOF_BASHRC
 fi
 
+# MOTD Setup
+log_info "Configurando MOTD..."
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+source /tmp/motd.sh
+motd_setup "pterodactyl"
+
 log_success "Instalação do Painel Pterodactyl concluída!"
 log_success "Acesso: http://${SERVER_IP}"
 log_success "Credenciais salvas em: $CRED_DIR/pterodactyl.txt"

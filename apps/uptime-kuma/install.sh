@@ -115,3 +115,9 @@ chmod 600 "$CRED_DIR/uptime-kuma.txt"
 log_success "Instalação do Uptime Kuma concluída!"
 log_info "Acesso: http://${SERVER_IP}:3001"
 log_info "Porta: 3001"
+
+# MOTD Setup
+log_info "Configurando MOTD..."
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+source /tmp/motd.sh
+motd_setup "uptime-kuma"
