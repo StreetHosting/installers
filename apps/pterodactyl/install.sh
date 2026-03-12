@@ -132,6 +132,8 @@ PTERO_APP_KEY="base64:$(openssl rand -base64 32)"
 cp .env.example .env
 sed -i "s|APP_URL=.*|APP_URL=http://${SERVER_IP}|g" .env
 sed -i "s|APP_KEY=.*|APP_KEY=${PTERO_APP_KEY}|g" .env
+sed -i "s|APP_TIMEZONE=.*|APP_TIMEZONE=America/Sao_Paulo|g" .env
+sed -i "s|APP_SERVICE_AUTHOR=.*|APP_SERVICE_AUTHOR=development@streetworks.com.br|g" .env
 sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${MYSQL_PTERO_PASS}|g" .env
 sed -i "s|DB_USERNAME=.*|DB_USERNAME=pterodactyl|g" .env
 sed -i "s|CACHE_DRIVER=.*|CACHE_DRIVER=redis|g" .env
@@ -302,11 +304,27 @@ if [[ $CONF_DOMAIN =~ ^[Ss]$ ]]; then
     if certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email; then
         echo "SSL configurado com sucesso!"
         
-        # Update Pterodactyl config
+        # Update Pterodactyl config non-interactively
         cd /var/www/pterodactyl
         sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN_NAME|g" .env
-        php artisan p:environment:setup --url="https://$DOMAIN_NAME"
+        php artisan p:environment:setup \
+            --url="https://$DOMAIN_NAME" \
+            --timezone="America/Sao_Paulo" \
+            --cache="redis" \
+            --session="redis" \
+            --queue="redis" \
+            --redis-host="127.0.0.1" \
+            --redis-port="6379" \
+            --settings-ui=true \
+            --telemetry=false \
+            --author="admin@example.com"
         
+        # Update Credentials file with new URL
+        CRED_FILE="/etc/street_preinstallers/credentials/pterodactyl.txt"
+        if [ -f "$CRED_FILE" ]; then
+            sed -i "s|URL: .*|URL: https://$DOMAIN_NAME|g" "$CRED_FILE"
+        fi
+
         echo "Sucesso! Seu painel agora está disponível em https://$DOMAIN_NAME"
     else
         echo "Falha ao gerar o SSL. Verifique seu DNS e tente novamente mais tarde."
