@@ -3,8 +3,7 @@
 
 # Network Initialization (Rule 9)
 # Assume the network may not be fully ready at boot.
-echo "Skipping network initialization check for n8n installation."
-# sleep 15 # -> Removed temporarily for testing (just for debugging!)
+sleep 15
 
 # Repository Configuration (Rule 2 & 3)
 # Always reference the stable branch for production installers.
@@ -12,8 +11,8 @@ REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
 # Download Shared Utilities (Rule 21 & 28)
 # Normalize line endings to prevent execution errors on Linux.
-curl -fsSL "$REPO_URL/shared/logging.sh" | sed 's/\r$//' > /tmp/logging.sh
-curl -fsSL "$REPO_URL/shared/docker.sh" | sed 's/\r$//' > /tmp/docker.sh
+curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
+curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.sh
 
 # Source Utilities
 source /tmp/logging.sh
@@ -97,7 +96,7 @@ services:
       retries: 10
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: n8nio/n8n:latest
     container_name: n8n
     restart: always
     environment:
@@ -131,7 +130,7 @@ services:
       retries: 15
 
   task-runners:
-    image: docker.n8n.io/n8nio/runners:latest
+    image: n8nio/runners:latest
     container_name: n8n-runners
     restart: always
     environment:
@@ -143,7 +142,10 @@ EOF
 
 # Start Application (Rule 23)
 log_info "Launching n8n container..."
-docker compose up -d
+if ! docker compose up -d; then
+    log_error "Docker Compose failed to start the stack."
+    exit 1
+fi
 
 # Wait for healthy status
 log_info "Waiting for n8n to become healthy..."
