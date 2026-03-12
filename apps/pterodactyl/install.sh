@@ -13,6 +13,16 @@ REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
 source /tmp/logging.sh
 
+# Initialize logging (Rule 8 & User Request)
+init_logging "pterodactyl"
+
+# Check if we are running in the background (to not depend 100% on Cloud-Init)
+if [[ "$1" != "--background" ]]; then
+    log_info "Relançando o instalador em segundo plano para não bloquear o boot..."
+    nohup bash "$0" --background > /dev/null 2>&1 &
+    exit 0
+fi
+
 log_info "Iniciando o processo de instalação do Painel Pterodactyl (Bare-Metal)..."
 
 # OS Detection & Validation (Rule 4)
@@ -88,6 +98,8 @@ EOF
 
 # Install Composer
 log_info "Instalando Composer..."
+export HOME=/root
+export COMPOSER_HOME=/root/.composer
 curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Download Pterodactyl (Rule 14 & User request)

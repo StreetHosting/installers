@@ -18,6 +18,16 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 source /tmp/logging.sh
 source /tmp/docker.sh
 
+# Initialize logging (Rule 8 & User Request)
+init_logging "n8n"
+
+# Check if we are running in the background (to not depend 100% on Cloud-Init)
+if [[ "$1" != "--background" ]]; then
+    log_info "Relançando o instalador em segundo plano para não bloquear o boot..."
+    nohup bash "$0" --background > /dev/null 2>&1 &
+    exit 0
+fi
+
 log_info "Iniciando o processo de instalação do n8n..."
 
 # OS Detection & Validation (Rule 4)
