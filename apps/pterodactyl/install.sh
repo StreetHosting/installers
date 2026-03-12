@@ -77,31 +77,19 @@ services:
       - MYSQL_DATABASE=panel
       - MYSQL_USER=pterodactyl
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASS}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
 
   cache:
     image: redis:7-alpine
     restart: always
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
 
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
     ports:
       - "8080:80"
-    depends_on:
-      database:
-        condition: service_healthy
-      cache:
-        condition: service_healthy
+    links:
+      - database
+      - cache
     volumes:
       - ./var/:/app/var/
       - /etc/localtime:/etc/localtime:ro
@@ -132,31 +120,40 @@ fi
 # Initializing Pterodactyl (Create User and migrate)
 log_info "Executando migrações e configuração inicial (isso pode levar um minuto)..."
 
-# Wait for containers to be ready
-log_info "Aguardando os containers ficarem prontos..."
-MAX_RETRIES=20
+# Wait for containers to be ready and install dependencies
+log_info "Aguardando os containers e instalando cliente MariaDB..."
+MAX_RETRIES=30
 COUNT=0
 # Temporarily disable set -e to handle migration retry logic
 set +e
 
 # Install mysql client inside the container (required for schema loading)
-# We do this in a loop to ensure the container is ready to accept commands
-log_info "Instalando cliente MariaDB no container para permitir migrações..."
-until docker compose exec -T panel apk add --no-cache mariadb-client; do
-    log_info "Aguardando container estar pronto para instalar dependências..."
-    sleep 5
-done
-
-until docker compose exec -T panel php artisan migrate --seed --force; do
+# We do this in a loop with a limit to avoid blocking the system forever
+until docker compose exec -T panel apk add --no-cache mariadb-client || [ $COUNT -eq $MAX_RETRIES ]; do
     COUNT=$((COUNT + 1))
-    if [ $COUNT -eq $MAX_RETRIES ]; then
-        log_error "As migrações falharam após $MAX_RETRIES tentativas. Verifique os logs do banco de dados."
-        docker compose logs database
-        exit 1
-    fi
-    log_info "Aguardando o banco de dados e containers... ($COUNT/$MAX_RETRIES)"
+    log_info "Aguardando container estar pronto para instalar dependências... ($COUNT/$MAX_RETRIES)"
     sleep 10
 done
+
+if [ $COUNT -eq $MAX_RETRIES ]; then
+    log_error "O container do Painel não ficou pronto a tempo. Abortando para evitar bloqueio do sistema."
+    docker compose logs panel
+    exit 1
+fi
+
+# Reset count for migrations
+COUNT=0
+until docker compose exec -T panel php artisan migrate --seed --force || [ $COUNT -eq $MAX_RETRIES ]; do
+    COUNT=$((COUNT + 1))
+    log_info "Aguardando o banco de dados e containers para migração... ($COUNT/$MAX_RETRIES)"
+    sleep 10
+done
+
+if [ $COUNT -eq $MAX_RETRIES ]; then
+    log_error "As migrações falharam após $MAX_RETRIES tentativas."
+    docker compose logs database
+    exit 1
+fi
 set -e
 
 # Create Initial Admin User (non-interactive)
@@ -247,7 +244,7 @@ if ! grep -q "pterodactyl-setup" /root/.bashrc; then
     cat <<'EOF_BASHRC' >> /root/.bashrc
 
 # Pterodactyl Setup Hook
-if [[ $- == *i* ]]; then
+if [[ $- == *i* ]] && [ -x /usr/local/bin/pterodactyl-setup ]; then
     /usr/local/bin/pterodactyl-setup
 fi
 EOF_BASHRC
