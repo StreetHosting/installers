@@ -138,6 +138,11 @@ MAX_RETRIES=20
 COUNT=0
 # Temporarily disable set -e to handle migration retry logic
 set +e
+
+# Install mysql client inside the container (required for schema loading in some versions)
+log_info "Garantindo a presença do cliente MySQL no container do Painel..."
+docker compose exec -T panel apk add --no-cache mariadb-client
+
 until docker compose exec -T panel php artisan migrate --seed --force; do
     COUNT=$((COUNT + 1))
     if [ $COUNT -eq $MAX_RETRIES ]; then
