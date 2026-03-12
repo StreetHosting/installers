@@ -12,7 +12,7 @@ sleep 15
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
 # Download Shared Utilities (Rule 21 & 28)
-# Normalize line endings to prevent execution errors on Linux.
+# Download Shared Utilities
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
 curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.sh
 
@@ -20,15 +20,19 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 source /tmp/logging.sh
 source /tmp/docker.sh
 
-# Initialize logging (Rule 8 & User Request)
-init_logging "uptime-kuma"
-
-# Check if we are running in the background (to not depend 100% on Cloud-Init)
+# Run in background using systemd-run for persistence
 if [[ "$1" != "--background" ]]; then
-    log_info "Relançando o instalador em segundo plano para não bloquear o boot..."
-    nohup bash "$0" --background > /dev/null 2>&1 &
+    log_info "Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..."
+    # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
+    systemd-run --unit=strt-inst-uptime-kuma --on-active=3 --timer-property=AccuracySec=1s bash -c "/bin/bash $0 --background &>> /var/log/strt_inst_uptime_kuma.log"
     exit 0
 fi
+
+log_info "Executando em segundo plano. Logs disponíveis em /var/log/strt_inst_uptime_kuma.log"
+
+# Ensure log file exists
+touch /var/log/strt_inst_uptime_kuma.log
+chmod 644 /var/log/strt_inst_uptime_kuma.log
 
 log_info "Iniciando o processo de instalação do Uptime Kuma..."
 
