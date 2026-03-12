@@ -83,7 +83,7 @@ _get_access_url() {
 echo ""
 
 if command -v figlet >/dev/null 2>&1; then
-    figlet -f speed "STREETHOSTING" 2>/dev/null | awk '
+    figlet -f slant "STREETHOSTING" 2>/dev/null | awk '
     {
         lines[NR] = $0
         len = length($0)

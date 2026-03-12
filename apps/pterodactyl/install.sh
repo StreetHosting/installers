@@ -389,10 +389,63 @@ if [ -z "$DOMAIN_NAME" ]; then
     exit 1
 fi
 
-printf "  ${ORANGE}⚠${RST}  ${WHITE}Certifique-se de que ${BLD}%s${RST}${WHITE} aponta para ${BLD}%s${RST}\n" "$DOMAIN_NAME" "$SERVER_IP"
+printf "  ${WHITE}Aponte ${BLD}%s${RST}${WHITE} para ${BLD}%s${RST}${WHITE} (registro A)${RST}\n" "$DOMAIN_NAME" "$SERVER_IP"
+printf "  ${DIM}${GRAY}Verificação automática — limite de 2 minutos${RST}\n"
 echo ""
-read -p "$(printf "  ${DIM}Pressione ${RST}${BLD}[Enter]${RST}${DIM} quando o DNS estiver configurado...${RST}")"
-echo ""
+
+DNS_OK=0
+ELAPSED=0
+INTERVAL=3
+TIMEOUT=120
+DNS_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+DNS_FLEN=${#DNS_FRAMES[@]}
+DNS_FI=0
+
+_resolve() {
+    local domain="$1" result=""
+    result=$(getent ahosts "$domain" 2>/dev/null | awk '/STREAM/{print $1; exit}')
+    if [ -z "$result" ] && command -v dig >/dev/null 2>&1; then
+        result=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' | head -1)
+    fi
+    if [ -z "$result" ] && command -v host >/dev/null 2>&1; then
+        result=$(host "$domain" 2>/dev/null | awk '/has address/{print $4}' | head -1)
+    fi
+    echo "$result"
+}
+
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    RESOLVED=$(_resolve "$DOMAIN_NAME")
+
+    if [ "$RESOLVED" = "$SERVER_IP" ]; then
+        DNS_OK=1
+        printf "\r  ${GREEN}✓${RST} ${WHITE}DNS verificado! ${BLD}%s${RST}${WHITE} → ${BLD}%s${RST}                              \n" "$DOMAIN_NAME" "$SERVER_IP"
+        break
+    fi
+
+    REMAINING=$((TIMEOUT - ELAPSED))
+    MINS=$((REMAINING / 60))
+    SECS=$((REMAINING % 60))
+
+    if [ -n "$RESOLVED" ] && [ "$RESOLVED" != "$SERVER_IP" ]; then
+        printf "\r  ${GOLD}%s${RST} ${WHITE}Aguardando DNS...${RST} ${DIM}${GRAY}%d:%02d · aponta para %s${RST}      " "${DNS_FRAMES[$DNS_FI]}" "$MINS" "$SECS" "$RESOLVED"
+    else
+        printf "\r  ${GOLD}%s${RST} ${WHITE}Aguardando DNS...${RST} ${DIM}${GRAY}%d:%02d restantes${RST}              " "${DNS_FRAMES[$DNS_FI]}" "$MINS" "$SECS"
+    fi
+    DNS_FI=$(( (DNS_FI + 1) % DNS_FLEN ))
+
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
+
+if [ $DNS_OK -eq 0 ]; then
+    echo ""
+    printf "  ${RED}✗${RST} ${WHITE}Tempo esgotado. DNS não propagou em 2 minutos.${RST}\n"
+    printf "  ${DIM}${GRAY}  Verifique a configuração e tente novamente com:${RST}\n"
+    printf "  ${GOLD}  street-domain-setup --force${RST}\n"
+    echo ""
+    exit 1
+fi
+
 echo ""
 
 (
