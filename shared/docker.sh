@@ -2,11 +2,11 @@
 
 install_docker() {
     if command -v docker >/dev/null 2>&1; then
-        echo "[INFO] Docker is already installed"
+        echo "[INFO] O Docker já está instalado"
         return 0
     fi
 
-    echo "[INFO] Installing Docker..."
+    echo "[INFO] Instalando Docker..."
     
     # Update and install dependencies
     DEBIAN_FRONTEND=noninteractive apt-get update -y
@@ -33,9 +33,9 @@ install_docker() {
     systemctl start docker
 
     if command -v docker >/dev/null 2>&1; then
-        echo "[SUCCESS] Docker installed successfully"
+        echo "[SUCCESS] Docker instalado com sucesso"
     else
-        echo "[ERROR] Docker installation failed"
+        echo "[ERROR] A instalação do Docker falhou"
         exit 1
     fi
 }

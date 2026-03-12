@@ -21,20 +21,20 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 source /tmp/logging.sh
 source /tmp/docker.sh
 
-log_info "Starting Uptime Kuma installation process..."
+log_info "Iniciando o processo de instalação do Uptime Kuma..."
 
 # OS Detection & Validation (Rule 4)
 if [ -f /etc/os-release ]; then
     source /etc/os-release
-    log_info "Detected OS: $NAME $VERSION_ID"
+    log_info "SO Detectado: $NAME $VERSION_ID"
 else
-    log_error "Could not detect operating system."
+    log_error "Não foi possível detectar o sistema operacional."
     exit 1
 fi
 
 # Ensure APT-based system (Rule 4)
 if ! command -v apt-get >/dev/null 2>&1; then
-    log_error "This installer only supports APT-based systems (Ubuntu/Debian)."
+    log_error "Este instalador suporta apenas sistemas baseados em APT (Ubuntu/Debian)."
     exit 1
 fi
 
@@ -44,7 +44,7 @@ install_docker
 
 # Application Isolation & Data Persistence (Rule 27 & 31)
 APP_DIR="/opt/apps/uptime-kuma"
-log_info "Setting up application directory: $APP_DIR"
+log_info "Configurando o diretório da aplicação: $APP_DIR"
 mkdir -p "$APP_DIR/data"
 
 cd "$APP_DIR"
@@ -53,7 +53,7 @@ cd "$APP_DIR"
 SERVER_IP=$(curl -s https://ifconfig.me || echo "SERVER_IP")
 
 # Deploy Uptime Kuma using Docker Compose (Rule 6)
-log_info "Creating Docker Compose configuration..."
+log_info "Gerando a configuração do Docker Compose..."
 cat <<EOF > docker-compose.yml
 services:
   uptime-kuma:
@@ -67,10 +67,10 @@ services:
 EOF
 
 # Start the application (Rule 23)
-log_info "Starting Uptime Kuma container..."
+log_info "Iniciando o container do Uptime Kuma..."
 docker compose up -d
 
 # Final Access Information (Rule 10)
-log_success "Uptime Kuma installation complete!"
-log_info "Access: http://${SERVER_IP}:3001"
-log_info "Port: 3001"
+log_success "Instalação do Uptime Kuma concluída!"
+log_info "Acesso: http://${SERVER_IP}:3001"
+log_info "Porta: 3001"

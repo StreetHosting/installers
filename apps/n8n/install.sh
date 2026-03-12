@@ -18,20 +18,20 @@ curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.
 source /tmp/logging.sh
 source /tmp/docker.sh
 
-log_info "Starting n8n installation process..."
+log_info "Iniciando o processo de instalação do n8n..."
 
 # OS Detection & Validation (Rule 4)
 if [ -f /etc/os-release ]; then
     source /etc/os-release
-    log_info "Detected OS: $NAME $VERSION_ID"
+    log_info "SO Detectado: $NAME $VERSION_ID"
 else
-    log_error "Could not detect operating system."
+    log_error "Não foi possível detectar o sistema operacional."
     exit 1
 fi
 
 # Ensure APT-based system (Rule 4)
 if ! command -v apt-get >/dev/null 2>&1; then
-    log_error "This installer only supports APT-based systems (Ubuntu/Debian)."
+    log_error "Este instalador suporta apenas sistemas baseados em APT (Ubuntu/Debian)."
     exit 1
 fi
 
@@ -41,7 +41,7 @@ install_docker
 
 # Application Isolation & Data Persistence (Rule 27 & 31)
 APP_DIR="/opt/apps/n8n"
-log_info "Setting up application directory: $APP_DIR"
+log_info "Configurando o diretório da aplicação: $APP_DIR"
 mkdir -p "$APP_DIR/n8n_data"
 mkdir -p "$APP_DIR/postgres_data"
 
@@ -59,7 +59,7 @@ POSTGRES_ADMIN_PASS=$(openssl rand -hex 12)
 POSTGRES_USER_PASS=$(openssl rand -hex 12)
 
 # Create Postgres Init Script
-log_info "Creating Postgres initialization script..."
+log_info "Criando script de inicialização do Postgres..."
 cat <<EOF > init-data.sh
 #!/bin/bash
 set -e
@@ -73,7 +73,7 @@ EOF
 chmod +x init-data.sh
 
 # Deploy n8n Stack using Docker Compose (Rule 6)
-log_info "Creating Docker Compose configuration..."
+log_info "Gerando a configuração do Docker Compose..."
 cat <<EOF > docker-compose.yml
 services:
   postgres:
@@ -141,34 +141,34 @@ services:
 EOF
 
 # Start Application (Rule 23)
-log_info "Launching n8n container..."
+log_info "Iniciando os containers do n8n..."
 if ! docker compose up -d; then
-    log_error "Docker Compose failed to start the stack."
+    log_error "O Docker Compose falhou ao iniciar a stack."
     exit 1
 fi
 
 # Wait for healthy status
-log_info "Waiting for n8n to become healthy..."
+log_info "Aguardando o n8n ficar saudável..."
 MAX_RETRIES=12
 COUNT=0
 until [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ] || [ $COUNT -eq $MAX_RETRIES ]; do
     sleep 10
     COUNT=$((COUNT + 1))
-    log_info "Still waiting... ($COUNT/$MAX_RETRIES)"
+    log_info "Aguardando... ($COUNT/$MAX_RETRIES)"
 done
 
 # Verify Installation
 if [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ]; then
-    log_success "n8n stack has been successfully installed and started."
-    log_success "Access: http://${SERVER_IP}:5678"
-    log_success "Port: 5678"
+    log_success "A stack n8n foi instalada e iniciada com sucesso."
+    log_success "Acesso: http://${SERVER_IP}:5678"
+    log_success "Porta: 5678"
     log_info "-------------------------------------------"
-    log_info "Database: PostgreSQL 16"
-    log_info "Task Runners: External Mode Enabled"
-    log_info "N8N_SECURE_COOKIE: false (HTTP Access Allowed)"
+    log_info "Banco de Dados: PostgreSQL 16"
+    log_info "Task Runners: Modo Externo Ativado"
+    log_info "N8N_SECURE_COOKIE: false (Acesso HTTP Permitido)"
     log_info "-------------------------------------------"
 else
-    log_error "n8n container failed to start or is not healthy."
+    log_error "O container n8n falhou ao iniciar ou não está saudável."
     docker logs n8n --tail 20
     exit 1
 fi
