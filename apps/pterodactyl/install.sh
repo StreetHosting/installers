@@ -339,8 +339,10 @@ _spin() {
     return $?
 }
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -z "$SERVER_IP" ] && SERVER_IP=$(curl -s https://ifconfig.me 2>/dev/null || echo "IP_DESCONHECIDO")
+SERVER_IP=$(curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null)
+[ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\./ && $i !~ /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/) {print $i; exit}}')
+[ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$SERVER_IP" ] && SERVER_IP="IP_DESCONHECIDO"
 
 CURRENT_URL=""
 if [ -f /var/www/pterodactyl/.env ]; then
@@ -404,12 +406,19 @@ START_TS=$(date +%s)
 
 _resolve() {
     local domain="$1" result=""
-    result=$(getent ahosts "$domain" 2>/dev/null | awk '/STREAM/{print $1; exit}')
+    result=$(getent ahosts "$domain" 2>/dev/null | awk '$2=="STREAM" && $1 ~ /^[0-9]+\./{print $1; exit}')
     if [ -z "$result" ] && command -v dig >/dev/null 2>&1; then
         result=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' | head -1)
     fi
     if [ -z "$result" ] && command -v host >/dev/null 2>&1; then
         result=$(host "$domain" 2>/dev/null | awk '/has address/{print $4}' | head -1)
+    fi
+    if [ -z "$result" ] && command -v nslookup >/dev/null 2>&1; then
+        result=$(nslookup "$domain" 8.8.8.8 2>/dev/null | awk '/^Address/{ip=$NF} END{if(ip !~ /#/) print ip}')
+    fi
+    if [ -z "$result" ]; then
+        result=$(curl -s --connect-timeout 3 "https://dns.google/resolve?name=${domain}&type=A" 2>/dev/null \
+            | grep -o '"data":"[^"]*"' | head -1 | cut -d'"' -f4)
     fi
     echo "$result"
 }
