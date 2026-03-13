@@ -3,51 +3,48 @@
 
 set -e
 
-# Network Initialization (Rule 9)
-# Assume the network may not be fully ready at boot.
-sleep 15
-
 # Repository Configuration (Rule 2 & 3)
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
 # Run in background using systemd-run for persistence
 if [[ "$1" != "--background" ]]; then
-    # Ensure log file exists before backgrounding
     touch /var/log/strt_inst_uptime_kuma.log
     chmod 644 /var/log/strt_inst_uptime_kuma.log
-    
+
     echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..." >> /var/log/strt_inst_uptime_kuma.log
-    
-    # Save the script to a physical file if it was piped or is not in a stable location
+
     INSTALLER_PATH="/tmp/strt_inst_uptime_kuma_exec.sh"
     if [ -f "$0" ] && [[ "$0" == *.sh ]]; then
         cat "$0" > "$INSTALLER_PATH"
     else
-        # If piped (bash), download it from the repo
         curl -fsSL "$REPO_URL/apps/uptime-kuma/install.sh" | sed 's/\r$//' > "$INSTALLER_PATH"
     fi
     chmod +x "$INSTALLER_PATH"
-    
-    # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
+
     systemd-run --unit=strt-inst-uptime-kuma --on-active=1 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_uptime_kuma.log"
     exit 0
 fi
 
-# Ensure log file exists (redundancy for background process)
+# Network Initialization (Rule 9)
+sleep 15
+
+# Ensure log file exists
 touch /var/log/strt_inst_uptime_kuma.log
 chmod 644 /var/log/strt_inst_uptime_kuma.log
 
 # Download Shared Utilities
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
 curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.sh
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+curl -fsSL "$REPO_URL/shared/domain-wizard.sh?nocache=1" | sed 's/\r$//' > /tmp/domain-wizard.sh
 
 # Source Utilities
 source /tmp/logging.sh
 source /tmp/docker.sh
+source /tmp/motd.sh
+source /tmp/domain-wizard.sh
 
 # MOTD Setup (early - atualiza status durante a instalação)
-curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
-source /tmp/motd.sh
 motd_setup "uptime-kuma"
 
 log_info "Iniciando o processo de instalação do Uptime Kuma..."
@@ -68,7 +65,6 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 
 # Install Docker (Rule 6 & 7)
-# This utility handles idempotency and non-interactive installation.
 install_docker
 
 # Application Isolation & Data Persistence (Rule 27 & 31)
@@ -92,12 +88,36 @@ services:
     volumes:
       - ./data:/app/data
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
 EOF
 
 # Start the application (Rule 23)
 log_info "Iniciando o container do Uptime Kuma..."
 docker compose up -d
+
+# Wait for container to be running
+log_info "Aguardando o Uptime Kuma iniciar..."
+MAX_RETRIES=10
+COUNT=0
+until [ "$(docker inspect --format='{{.State.Running}}' uptime-kuma 2>/dev/null)" == "true" ] || [ $COUNT -eq $MAX_RETRIES ]; do
+    sleep 5
+    COUNT=$((COUNT + 1))
+    log_info "Aguardando... ($COUNT/$MAX_RETRIES)"
+done
+
+if [ "$(docker inspect --format='{{.State.Running}}' uptime-kuma 2>/dev/null)" != "true" ]; then
+    log_error "O container Uptime Kuma falhou ao iniciar."
+    docker logs uptime-kuma --tail 20
+    exit 1
+fi
+
+log_success "O Uptime Kuma foi instalado e iniciado com sucesso."
+
+# Setup Nginx Reverse Proxy
+install_nginx_proxy "uptime-kuma" "$SERVER_IP" "3001"
+
+# Install Domain Wizard (no post-hook needed — Uptime Kuma has no app-level URL config)
+install_domain_wizard "uptime-kuma" "Uptime Kuma" "/var/log/strt_inst_uptime_kuma.log"
 
 # Save Credentials
 CRED_DIR="/etc/street_preinstallers/credentials"
@@ -108,15 +128,18 @@ Uptime Kuma - Informações de Acesso
 Gerado em: $(date)
 ====================================================
 
-Acesso: http://${SERVER_IP}:3001
-Porta: 3001
+Acesso: http://${SERVER_IP}
+Porta: 80 (Nginx) → 3001 (Uptime Kuma)
 
 Nota: Configure seu usuário administrador no primeiro acesso.
+
+Diretório da Aplicação: ${APP_DIR}
 ====================================================
 EOF
 chmod 600 "$CRED_DIR/uptime-kuma.txt"
 
 # Final Access Information (Rule 10)
 log_success "Instalação do Uptime Kuma concluída!"
-log_info "Acesso: http://${SERVER_IP}:3001"
-log_info "Porta: 3001"
+log_success "Acesso: http://${SERVER_IP}"
+log_success "Porta: 80 (Nginx → 3001)"
+log_success "Credenciais salvas em: $CRED_DIR/uptime-kuma.txt"

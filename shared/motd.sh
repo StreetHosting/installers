@@ -65,6 +65,18 @@ _get_access_url() {
     server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     [ -z "$server_ip" ] && server_ip="IP_DO_SERVIDOR"
 
+    local conf_file="/etc/street_preinstallers/domain-wizard.conf"
+    if [ -f "$conf_file" ]; then
+        local conf_url
+        conf_url=$(grep -E '^CONFIGURED_URL=' "$conf_file" 2>/dev/null | sed 's/^CONFIGURED_URL=//')
+        if [ -n "$conf_url" ]; then
+            echo "$conf_url"
+            return
+        fi
+        echo "http://${server_ip}"
+        return
+    fi
+
     case "$1" in
         pterodactyl)
             if [ -f /var/www/pterodactyl/.env ]; then

@@ -1,51 +1,50 @@
 # n8n Installer for VirtFusion
 # This script is designed to run non-interactively within a Cloud-Init context.
 
-# Network Initialization (Rule 9)
-# Assume the network may not be fully ready at boot.
-sleep 15
+set -e
 
 # Repository Configuration (Rule 2 & 3)
 REPO_URL="https://raw.githubusercontent.com/StreetHosting/installers/stable"
 
 # Run in background using systemd-run for persistence
 if [[ "$1" != "--background" ]]; then
-    # Ensure log file exists before backgrounding
     touch /var/log/strt_inst_n8n.log
     chmod 644 /var/log/strt_inst_n8n.log
-    
+
     echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - Relançando o instalador em segundo plano via systemd-run para não bloquear o boot..." >> /var/log/strt_inst_n8n.log
-    
-    # Save the script to a physical file if it was piped or is not in a stable location
+
     INSTALLER_PATH="/tmp/strt_inst_n8n_exec.sh"
     if [ -f "$0" ] && [[ "$0" == *.sh ]]; then
         cat "$0" > "$INSTALLER_PATH"
     else
-        # If piped (bash), download it from the repo
         curl -fsSL "$REPO_URL/apps/n8n/install.sh" | sed 's/\r$//' > "$INSTALLER_PATH"
     fi
     chmod +x "$INSTALLER_PATH"
-    
-    # The command is wrapped in 'bash -c "..."' to handle the output redirection correctly
+
     systemd-run --unit=strt-inst-n8n --on-active=1 --timer-property=AccuracySec=1s /bin/bash -c "$INSTALLER_PATH --background &>> /var/log/strt_inst_n8n.log"
     exit 0
 fi
 
-# Ensure log file exists (redundancy for background process)
+# Network Initialization (Rule 9)
+sleep 15
+
+# Ensure log file exists
 touch /var/log/strt_inst_n8n.log
 chmod 644 /var/log/strt_inst_n8n.log
 
 # Download Shared Utilities
 curl -fsSL "$REPO_URL/shared/logging.sh?nocache=1" | sed 's/\r$//' > /tmp/logging.sh
 curl -fsSL "$REPO_URL/shared/docker.sh?nocache=1" | sed 's/\r$//' > /tmp/docker.sh
+curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
+curl -fsSL "$REPO_URL/shared/domain-wizard.sh?nocache=1" | sed 's/\r$//' > /tmp/domain-wizard.sh
 
 # Source Utilities
 source /tmp/logging.sh
 source /tmp/docker.sh
+source /tmp/motd.sh
+source /tmp/domain-wizard.sh
 
 # MOTD Setup (early - atualiza status durante a instalação)
-curl -fsSL "$REPO_URL/shared/motd.sh?nocache=1" | sed 's/\r$//' > /tmp/motd.sh
-source /tmp/motd.sh
 motd_setup "n8n"
 
 log_info "Iniciando o processo de instalação do n8n..."
@@ -66,7 +65,6 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 
 # Install Docker (Rule 6 & 7)
-# This utility handles idempotency and non-interactive installation.
 install_docker
 
 # Application Isolation & Data Persistence (Rule 27 & 31)
@@ -75,9 +73,7 @@ log_info "Configurando o diretório da aplicação: $APP_DIR"
 mkdir -p "$APP_DIR/n8n_data"
 mkdir -p "$APP_DIR/postgres_data"
 
-# Ensure the data directory is writable by n8n user (UID 1000)
 chown -R 1000:1000 "$APP_DIR/n8n_data"
-# Postgres directory usually managed by container, but we ensure base exists
 cd "$APP_DIR"
 
 # Get Public IP for configuration
@@ -90,21 +86,32 @@ POSTGRES_USER_PASS=$(openssl rand -hex 12)
 
 # Create Postgres Init Script
 log_info "Criando script de inicialização do Postgres..."
-cat <<EOF > init-data.sh
+cat <<'INITEOF' > init-data.sh
 #!/bin/bash
 set -e
 
-psql -v ON_ERROR_STOP=1 --username "\$POSTGRES_USER" --dbname "\$POSTGRES_DB" <<-EOSQL
-	CREATE USER \$POSTGRES_NON_ROOT_USER WITH PASSWORD '\$POSTGRES_NON_ROOT_PASSWORD';
-	GRANT ALL PRIVILEGES ON DATABASE \$POSTGRES_DB TO \$POSTGRES_NON_ROOT_USER;
-	GRANT ALL ON SCHEMA public TO \$POSTGRES_NON_ROOT_USER;
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+	CREATE USER $POSTGRES_NON_ROOT_USER WITH PASSWORD '$POSTGRES_NON_ROOT_PASSWORD';
+	GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_NON_ROOT_USER;
+	GRANT ALL ON SCHEMA public TO $POSTGRES_NON_ROOT_USER;
 EOSQL
-EOF
+INITEOF
 chmod +x init-data.sh
+
+# Create .env file for Docker Compose variable interpolation
+log_info "Gerando arquivo de variáveis de ambiente..."
+cat <<EOF > .env
+POSTGRES_ADMIN_PASS=${POSTGRES_ADMIN_PASS}
+POSTGRES_USER_PASS=${POSTGRES_USER_PASS}
+RUNNERS_AUTH_TOKEN=${RUNNERS_AUTH_TOKEN}
+WEBHOOK_URL=http://${SERVER_IP}/
+N8N_PROTOCOL=http
+N8N_EDITOR_BASE_URL=http://${SERVER_IP}/
+EOF
 
 # Deploy n8n Stack using Docker Compose (Rule 6)
 log_info "Gerando a configuração do Docker Compose..."
-cat <<EOF > docker-compose.yml
+cat <<'COMPOSEEOF' > docker-compose.yml
 services:
   postgres:
     image: postgres:16
@@ -138,16 +145,17 @@ services:
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_USER_PASS}
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
       - NODE_ENV=production
-      - WEBHOOK_URL=http://${SERVER_IP}:5678/
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
       - N8N_SECURE_COOKIE=false
       - N8N_RUNNERS_ENABLED=true
       - N8N_RUNNERS_MODE=external
       - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
       - N8N_RUNNERS_AUTH_TOKEN=${RUNNERS_AUTH_TOKEN}
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     volumes:
       - ./n8n_data:/home/node/.n8n
     depends_on:
@@ -168,7 +176,7 @@ services:
       - N8N_RUNNERS_AUTH_TOKEN=${RUNNERS_AUTH_TOKEN}
     depends_on:
       - n8n
-EOF
+COMPOSEEOF
 
 # Start Application (Rule 23)
 log_info "Iniciando os containers do n8n..."
@@ -181,26 +189,56 @@ fi
 log_info "Aguardando o n8n ficar saudável..."
 MAX_RETRIES=12
 COUNT=0
-until [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ] || [ $COUNT -eq $MAX_RETRIES ]; do
+until [ "$(docker inspect --format='{{.State.Health.Status}}' n8n 2>/dev/null)" == "healthy" ] || [ $COUNT -eq $MAX_RETRIES ]; do
     sleep 10
     COUNT=$((COUNT + 1))
     log_info "Aguardando... ($COUNT/$MAX_RETRIES)"
 done
 
-# Verify Installation
-if [ "$(docker inspect --format='{{.State.Health.Status}}' n8n)" == "healthy" ]; then
-    log_success "A stack n8n foi instalada e iniciada com sucesso."
-    
-    # Save Credentials
-    CRED_DIR="/etc/street_preinstallers/credentials"
-    mkdir -p "$CRED_DIR"
-    cat <<EOF > "$CRED_DIR/n8n.txt"
+if [ "$(docker inspect --format='{{.State.Health.Status}}' n8n 2>/dev/null)" != "healthy" ]; then
+    log_error "O container n8n falhou ao iniciar ou não está saudável."
+    docker logs n8n --tail 20
+    exit 1
+fi
+
+log_success "A stack n8n foi instalada e iniciada com sucesso."
+
+# Setup Nginx Reverse Proxy
+install_nginx_proxy "n8n" "$SERVER_IP" "5678"
+
+# Create domain wizard post-hook (updates n8n env vars on domain change)
+mkdir -p /etc/street_preinstallers
+cat <<'HOOKEOF' > /etc/street_preinstallers/domain-hook.sh
+#!/bin/bash
+cd /opt/apps/n8n
+
+NEW_PROTO="http"
+if echo "$NEW_URL" | grep -q '^https'; then
+    NEW_PROTO="https"
+fi
+
+sed -i "s|^WEBHOOK_URL=.*|WEBHOOK_URL=${NEW_URL}/|" .env
+sed -i "s|^N8N_PROTOCOL=.*|N8N_PROTOCOL=${NEW_PROTO}|" .env
+sed -i "s|^N8N_EDITOR_BASE_URL=.*|N8N_EDITOR_BASE_URL=${NEW_URL}/|" .env
+
+docker compose up -d
+HOOKEOF
+chmod +x /etc/street_preinstallers/domain-hook.sh
+
+# Install Domain Wizard
+install_domain_wizard "n8n" "n8n" "/var/log/strt_inst_n8n.log"
+
+# Save Credentials
+CRED_DIR="/etc/street_preinstallers/credentials"
+mkdir -p "$CRED_DIR"
+cat <<EOF > "$CRED_DIR/n8n.txt"
 ====================================================
 n8n - Credenciais de Acesso
 Gerado em: $(date)
 ====================================================
 
-Acesso: http://${SERVER_IP}:5678
+Acesso: http://${SERVER_IP}
+Porta: 80 (Nginx) → 5678 (n8n)
 
 Banco de Dados (PostgreSQL):
 Database: n8n_database
@@ -211,19 +249,13 @@ App Pass: ${POSTGRES_USER_PASS}
 
 Segurança:
 Runners Auth Token: ${RUNNERS_AUTH_TOKEN}
+
+Diretório da Aplicação: ${APP_DIR}
 ====================================================
 EOF
-    chmod 600 "$CRED_DIR/n8n.txt"
+chmod 600 "$CRED_DIR/n8n.txt"
 
-    log_success "Acesso: http://${SERVER_IP}:5678"
-    log_success "Porta: 5678"
-    log_info "-------------------------------------------"
-    log_info "Banco de Dados: PostgreSQL 16"
-    log_info "Task Runners: Modo Externo Ativado"
-    log_info "N8N_SECURE_COOKIE: false (Acesso HTTP Permitido)"
-    log_info "-------------------------------------------"
-else
-    log_error "O container n8n falhou ao iniciar ou não está saudável."
-    docker logs n8n --tail 20
-    exit 1
-fi
+log_success "Instalação do n8n concluída!"
+log_success "Acesso: http://${SERVER_IP}"
+log_success "Porta: 80 (Nginx → 5678)"
+log_success "Credenciais salvas em: $CRED_DIR/n8n.txt"
