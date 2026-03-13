@@ -32,7 +32,7 @@ Until the SSL/Domain setup is complete, you can access the panel via:
 `http://SERVER_IP`
 
 **Initial Admin Credentials:**
-- **Email**: `admin@example.com`
+- **Email**: `admin@streetworks.com.br`
 - **Username**: `admin`
 - **Password**: (Generated during installation - check the provisioner logs)
 

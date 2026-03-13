@@ -394,12 +394,13 @@ printf "  ${DIM}${GRAY}Verificação automática — limite de 2 minutos${RST}\n
 echo ""
 
 DNS_OK=0
-ELAPSED=0
-INTERVAL=3
 TIMEOUT=120
 DNS_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 DNS_FLEN=${#DNS_FRAMES[@]}
 DNS_FI=0
+DNS_RESULT=$(mktemp)
+echo "" > "$DNS_RESULT"
+START_TS=$(date +%s)
 
 _resolve() {
     local domain="$1" result=""
@@ -413,8 +414,26 @@ _resolve() {
     echo "$result"
 }
 
-while [ $ELAPSED -lt $TIMEOUT ]; do
-    RESOLVED=$(_resolve "$DOMAIN_NAME")
+(
+    while true; do
+        r=$(_resolve "$DOMAIN_NAME")
+        echo "$r" > "$DNS_RESULT"
+        sleep 3
+    done
+) &
+DNS_PID=$!
+
+trap "kill $DNS_PID 2>/dev/null; rm -f '$DNS_RESULT'" EXIT
+
+while true; do
+    NOW_TS=$(date +%s)
+    ELAPSED=$((NOW_TS - START_TS))
+
+    if [ $ELAPSED -ge $TIMEOUT ]; then
+        break
+    fi
+
+    RESOLVED=$(cat "$DNS_RESULT" 2>/dev/null | tr -d '[:space:]')
 
     if [ "$RESOLVED" = "$SERVER_IP" ]; then
         DNS_OK=1
@@ -423,6 +442,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
     fi
 
     REMAINING=$((TIMEOUT - ELAPSED))
+    [ $REMAINING -lt 0 ] && REMAINING=0
     MINS=$((REMAINING / 60))
     SECS=$((REMAINING % 60))
 
@@ -433,9 +453,13 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
     fi
     DNS_FI=$(( (DNS_FI + 1) % DNS_FLEN ))
 
-    sleep $INTERVAL
-    ELAPSED=$((ELAPSED + INTERVAL))
+    sleep 0.08
 done
+
+kill $DNS_PID 2>/dev/null
+wait $DNS_PID 2>/dev/null
+rm -f "$DNS_RESULT"
+trap - EXIT
 
 if [ $DNS_OK -eq 0 ]; then
     echo ""
